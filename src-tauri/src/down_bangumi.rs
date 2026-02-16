@@ -11,7 +11,6 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use crate::down_bv::get_pic;
 use crate::refresh_cookie::{create_headers, Cookies};
 use crate::resolution;
 

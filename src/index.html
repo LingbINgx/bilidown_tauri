@@ -9,83 +9,90 @@
 </head>
 
 <body>
-    <div class="container">
-        <header>
-            <h1>Bilibili 视频下载器</h1>
-            <div class="header-buttons">
-                <button id="settingsBtn" class="btn-secondary">设置</button>
-                <button id="aboutBtn" class="btn-secondary">关于</button>
-            </div>
-        </header>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <nav class="sidebar-nav">
+                <button type="button" id="navMain" class="sidebar-item active">主界面</button>
+                <button type="button" id="navSettings" class="sidebar-item">设置</button>
+                <button type="button" id="navAbout" class="sidebar-item">关于</button>
+            </nav>
+        </aside>
+        <div class="content-area">
+            <div class="container">
+                <header>
+                    <h1>Bilibili 视频下载器</h1>
+                </header>
 
-        <main id="mainView">
-            <div class="login-section">
-                <div class="button-group">
-                    <button id="loginBtn" class="btn-primary">登录</button>
-                    <button id="logoutBtn" class="btn-secondary">登出</button>
+                <div id="mainView" class="view">
+                    <main>
+                        <div class="login-section">
+                            <div class="button-group">
+                                <button id="loginBtn" class="btn-primary">登录</button>
+                                <button id="logoutBtn" class="btn-secondary">登出</button>
+                            </div>
+                            <div id="loginStatus" class="status-text"></div>
+                        </div>
+
+                        <div class="input-section">
+                            <label for="videoUrl">视频地址输入:</label>
+                            <textarea id="videoUrl" placeholder="输入视频链接或BV号（支持多行）" rows="4"></textarea>
+                        </div>
+
+                        <div class="download-section">
+                            <div class="resolution-group">
+                                <label for="resolution">分辨率:</label>
+                                <select id="resolution">
+                                    <option value="">请选择（默认最高画质）</option>
+                                </select>
+                            </div>
+                            <button id="downloadBtn" class="btn-primary">下载</button>
+                        </div>
+
+                        <div class="info-section">
+                            <div class="cover-section">
+                                <label>封面:</label>
+                                <div id="coverContainer">
+                                    <img id="coverImage" style="display: none;" alt="视频封面">
+                                    <p id="noCover" class="placeholder">暂无封面</p>
+                                </div>
+                            </div>
+                            <div class="title-section">
+                                <label>标题:</label>
+                                <div id="titleText" class="title-display"></div>
+                            </div>
+                        </div>
+
+                        <div class="progress-section">
+                            <label>下载进度:</label>
+                            <div id="progressContainer">
+                                <div id="progressBar" class="progress-bar">
+                                    <div id="progressFill" class="progress-fill"></div>
+                                </div>
+                                <div id="progressText" class="progress-text"></div>
+                            </div>
+                        </div>
+
+                        <div id="downloadList" class="download-list"></div>
+                    </main>
                 </div>
-                <div id="loginStatus" class="status-text"></div>
-            </div>
 
-            <div class="input-section">
-                <label for="videoUrl">视频地址输入:</label>
-                <textarea id="videoUrl" placeholder="输入视频链接或BV号（支持多行）" rows="4"></textarea>
-            </div>
-
-            <div class="download-section">
-                <div class="resolution-group">
-                    <label for="resolution">分辨率:</label>
-                    <select id="resolution">
-                        <option value="">请选择（默认4K）</option>
-                    </select>
-                </div>
-                <button id="downloadBtn" class="btn-primary">下载</button>
-            </div>
-
-            <div class="info-section">
-                <div class="cover-section">
-                    <label>封面:</label>
-                    <div id="coverContainer">
-                        <img id="coverImage" style="display: none;" alt="视频封面">
-                        <p id="noCover" class="placeholder">暂无封面</p>
+                <div id="settingsView" class="view hidden">
+                    <h2>设置</h2>
+                    <div class="settings-group">
+                        <label for="savePath">保存路径:</label>
+                        <input type="text" id="savePath" placeholder="./download">
+                        <button id="saveSettingsBtn" class="btn-primary">保存</button>
                     </div>
                 </div>
-                <div class="title-section">
-                    <label>标题:</label>
-                    <div id="titleText" class="title-display"></div>
-                </div>
-            </div>
 
-            <div class="progress-section">
-                <label>下载进度:</label>
-                <div id="progressContainer">
-                    <div id="progressBar" class="progress-bar">
-                        <div id="progressFill" class="progress-fill"></div>
+                <div id="aboutView" class="view hidden">
+                    <h2>关于</h2>
+                    <div class="about-content">
+                        <p>Bili Downloader v0.1.0</p>
+                        <p>基于 Rust + Tauri 2 构建的 B 站视频下载工具</p>
+                        <p>支持 BV 视频和番剧下载</p>
                     </div>
-                    <div id="progressText" class="progress-text"></div>
                 </div>
-            </div>
-
-            <div id="downloadList" class="download-list"></div>
-        </main>
-
-        <div id="settingsView" class="view hidden">
-            <button id="backToMainBtn" class="btn-secondary">返回主菜单</button>
-            <h2>设置</h2>
-            <div class="settings-group">
-                <label for="savePath">保存路径:</label>
-                <input type="text" id="savePath" placeholder="./download">
-                <button id="saveSettingsBtn" class="btn-primary">保存</button>
-            </div>
-        </div>
-
-        <div id="aboutView" class="view hidden">
-            <button id="backToMainBtn2" class="btn-secondary">返回主菜单</button>
-            <h2>关于</h2>
-            <div class="about-content">
-                <p>Bili Downloader v0.1.0</p>
-                <p>基于 Rust + Tauri 2 构建的 B 站视频下载工具</p>
-                <p>支持 BV 视频和番剧下载</p>
             </div>
         </div>
     </div>

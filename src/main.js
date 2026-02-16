@@ -1,14 +1,31 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-// 视图切换
+document.addEventListener("contextmenu", function (e) {
+
+    if (
+        e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.isContentEditable
+    ) {
+        return;
+    }
+
+    e.preventDefault();
+});
+
+
 let currentView = 'main';
 
 function showView(viewName) {
+    currentView = viewName;
     document.getElementById('mainView').classList.toggle('hidden', viewName !== 'main');
     document.getElementById('settingsView').classList.toggle('hidden', viewName !== 'settings');
     document.getElementById('aboutView').classList.toggle('hidden', viewName !== 'about');
-    currentView = viewName;
+    const views = ['main', 'settings', 'about'];
+    document.querySelectorAll('.sidebar-item').forEach((el, i) => {
+        el.classList.toggle('active', views[i] === viewName);
+    });
 }
 
 function setProgress(percent) {
@@ -161,7 +178,6 @@ async function getVideoInfo(url) {
 async function handleDownload() {
     const urlInput = document.getElementById('videoUrl');
     const resolutionSelect = document.getElementById('resolution');
-    const savePathInput = document.getElementById('savePath');
 
     const urls = urlInput.value.trim().split('\n').filter(u => u.trim());
     if (urls.length === 0) {
@@ -170,7 +186,10 @@ async function handleDownload() {
     }
 
     const resolution = resolutionSelect.value || '4K';
-    const savePath = savePathInput.value || './download';
+    let savePath = './download';
+    try {
+        savePath = await invoke('get_save_path') || savePath;
+    } catch (_) { }
 
     const downloadBtn = document.getElementById('downloadBtn');
     downloadBtn.disabled = true;
@@ -245,11 +264,10 @@ async function saveSettings() {
 document.addEventListener('DOMContentLoaded', () => {
     init();
 
-    // 视图切换
-    document.getElementById('settingsBtn').addEventListener('click', () => showView('settings'));
-    document.getElementById('aboutBtn').addEventListener('click', () => showView('about'));
-    document.getElementById('backToMainBtn').addEventListener('click', () => showView('main'));
-    document.getElementById('backToMainBtn2').addEventListener('click', () => showView('main'));
+    // 右侧边栏：主界面 / 设置 / 关于
+    document.getElementById('navMain').addEventListener('click', () => showView('main'));
+    document.getElementById('navSettings').addEventListener('click', () => showView('settings'));
+    document.getElementById('navAbout').addEventListener('click', () => showView('about'));
 
     // 登录/登出
     document.getElementById('loginBtn').addEventListener('click', handleLogin);

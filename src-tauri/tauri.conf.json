@@ -10,9 +10,13 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "bilidown_tauri",
-        "width": 800,
-        "height": 600
+        "title": "Bilibili Downloader",
+        "width": 900,
+        "height": 650,
+        "minWidth": 900,
+        "minHeight": 650,
+        "resizable": true,
+        "maximizable": false
       }
     ],
     "security": {
@@ -23,10 +27,6 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
       "icons/icon.ico"
     ]
   }
