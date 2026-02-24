@@ -7,10 +7,13 @@ use reqwest::Client;
 use serde_json::{self, Value};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Instant;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
+use crate::progress;
 use crate::refresh_cookie::{create_headers, Cookies};
 use crate::resolution;
 
@@ -18,8 +21,10 @@ pub async fn down_main(
     (ep_id, season_id): (&str, &str),
     rsl: &str,
     save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
+    title_tx: Option<(usize, mpsc::Sender<(usize, String)>)>,
 ) -> Result<()> {
-    download_bangumi(ep_id, season_id, rsl, save_path).await?;
+    download_bangumi(ep_id, season_id, rsl, save_path, progress_tx, title_tx).await?;
     Ok(())
 }
 
@@ -110,7 +115,15 @@ fn get_file_url(response: &Value, rsl: &str) -> Result<(String, String, i32)> {
     Ok((url_video.to_string(), url_audio.to_string(), qn))
 }
 
-async fn down_from_url(url: &str, client: Client, headers: HeaderMap, path: &str) -> Result<()> {
+async fn down_from_url(
+    url: &str,
+    client: Client,
+    headers: HeaderMap,
+    path: &str,
+    progress_tx: Option<&mpsc::Sender<progress::DownloadProgress>>,
+    file_index: u32,
+    file_count: u32,
+) -> Result<()> {
     let resp = client
         .get(url)
         .headers(headers.clone())
@@ -129,11 +142,48 @@ async fn down_from_url(url: &str, client: Client, headers: HeaderMap, path: &str
 
     let mut file = File::create(&path).await?;
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.try_next().await? {
-        let chunk = chunk;
-        file.write_all(&chunk).await?;
+    let mut downloaded: u64 = 0;
+    let mut last_emit = Instant::now();
+    let mut last_downloaded: u64 = 0;
+    const EMIT_INTERVAL_MS: u64 = 200;
 
-        pb.inc(chunk.len() as u64);
+    while let Some(chunk) = stream.try_next().await? {
+        file.write_all(&chunk).await?;
+        let len = chunk.len() as u64;
+        downloaded += len;
+        pb.inc(len);
+
+        if let Some(tx) = progress_tx {
+            if last_emit.elapsed().as_millis() >= EMIT_INTERVAL_MS as u128
+                || downloaded >= total_size
+            {
+                let elapsed_secs = last_emit.elapsed().as_secs_f64().max(0.001);
+                let speed = (downloaded - last_downloaded) as f64 / elapsed_secs;
+                let eta_secs = if speed > 0.0 && total_size > downloaded {
+                    ((total_size - downloaded) as f64 / speed) as u64
+                } else {
+                    0
+                };
+                let percent = if total_size > 0 {
+                    100.0 * downloaded as f64 / total_size as f64
+                } else {
+                    0.0
+                };
+                let _ = tx
+                    .send(progress::DownloadProgress {
+                        downloaded,
+                        total: total_size,
+                        percent,
+                        speed,
+                        eta_secs,
+                        file_index,
+                        file_count,
+                    })
+                    .await;
+                last_emit = Instant::now();
+                last_downloaded = downloaded;
+            }
+        }
     }
     pb.set_position(total_size);
     pb.finish_with_message("Downloaded stream");
@@ -149,6 +199,7 @@ async fn down_file_bangumi(
     headers: HeaderMap,
     rsl: &str,
     save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
 ) -> Result<()> {
     let (url_video, url_audio, qn) = get_file_url(&url_response, rsl)?;
     let qn_c = resolution::qn(rsl);
@@ -192,10 +243,11 @@ async fn down_file_bangumi(
     println!("downloading {}", bangumi_name);
 
     let urls = vec![(url_video, video_path), (url_audio, audio_path)];
-    for (url, path) in urls {
+    for (file_index, (url, path)) in urls.iter().enumerate() {
         let client = client.clone();
         let headers = headers.clone();
-        down_from_url(&url, client, headers, &path).await?;
+        let tx_ref = progress_tx.as_ref();
+        down_from_url(url, client, headers, path, tx_ref, file_index as u32, 2).await?;
     }
 
     concat_video_audio(bangumi_name.clone(), save_path.clone()).await?;
@@ -345,6 +397,7 @@ async fn down_season(
     name_response: Value,
     rsl: &str,
     save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
 ) -> Result<()> {
     let url_response = get_playurl(&client, &ep_id_cp, "", headers.clone(), rsl).await?;
     down_file_bangumi(
@@ -355,6 +408,7 @@ async fn down_season(
         headers.clone(),
         rsl,
         save_path.clone(),
+        progress_tx,
     )
     .await?;
     Ok(())
@@ -366,12 +420,26 @@ async fn download_bangumi(
     season_id: &str,
     rsl: &str,
     save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
+    title_tx: Option<(usize, mpsc::Sender<(usize, String)>)>,
 ) -> Result<()> {
     let client = reqwest::Client::new();
     let path = Path::new("./load");
     let cookie = read_cookie_or_not(&path).await?;
     let headers = create_headers(&cookie);
     let name_response = get_bangumi_name(&client, &ep_id, &season_id, headers.clone()).await?;
+    let display_title = if !season_id.is_empty() {
+        name_response["result"]["title"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+    } else {
+        get_bangumi_name_from_json(name_response.clone(), ep_id)
+    };
+    let display_title = remove_punctuation(&display_title);
+    if let Some((idx, tx)) = &title_tx {
+        let _ = tx.send((*idx, display_title.clone())).await;
+    }
     if season_id != "" {
         for i in 0..name_response["result"]["episodes"]
             .as_array()
@@ -389,12 +457,12 @@ async fn download_bangumi(
                 name_response.clone(),
                 rsl,
                 save_path.clone(),
+                progress_tx.clone(),
             )
             .await?;
         }
     } else {
         let url_response = get_playurl(&client, &ep_id, "", headers.clone(), rsl).await?;
-        //println!("{:#}", url_response);
         down_file_bangumi(
             url_response,
             name_response,
@@ -403,6 +471,7 @@ async fn download_bangumi(
             headers,
             rsl,
             save_path.clone(),
+            progress_tx,
         )
         .await?;
     }

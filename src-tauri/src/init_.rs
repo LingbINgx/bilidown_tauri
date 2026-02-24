@@ -1,6 +1,8 @@
 use crate::down_bangumi;
 use crate::down_bv;
+use crate::progress;
 use anyhow::{Context, Result};
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Video {
@@ -59,13 +61,32 @@ pub fn get_epid_season(url: &str) -> Result<Video> {
     }
 }
 
-pub async fn choose_download_method(video: &Video, rsl: &str, save_path: &str) -> Result<String> {
+pub async fn choose_download_method(
+    video: &Video,
+    rsl: &str,
+    save_path: &str,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
+    title_tx: Option<(usize, mpsc::Sender<(usize, String)>)>,
+) -> Result<String> {
     let mut title = String::new();
     if !video.ep_id.is_empty() || !video.season_id.is_empty() {
-        down_bangumi::down_main((&video.ep_id, &video.season_id), rsl, save_path.to_string())
-            .await?;
+        down_bangumi::down_main(
+            (&video.ep_id, &video.season_id),
+            rsl,
+            save_path.to_string(),
+            progress_tx,
+            title_tx,
+        )
+        .await?;
     } else if !video.bv_id.is_empty() {
-        title = down_bv::down_main(&video.bv_id, rsl, save_path.to_string()).await?;
+        title = down_bv::down_main(
+            &video.bv_id,
+            rsl,
+            save_path.to_string(),
+            progress_tx,
+            title_tx,
+        )
+        .await?;
     } else {
         Err(anyhow::anyhow!("No valid video ID found"))?;
     }

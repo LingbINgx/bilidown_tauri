@@ -13,6 +13,8 @@
         <aside class="sidebar">
             <nav class="sidebar-nav">
                 <button type="button" id="navMain" class="sidebar-item active">主界面</button>
+                <button type="button" id="navProgress" class="sidebar-item">下载进度</button>
+                <button type="button" id="navHistory" class="sidebar-item">历史记录</button>
                 <button type="button" id="navSettings" class="sidebar-item">设置</button>
                 <button type="button" id="navAbout" class="sidebar-item">关于</button>
             </nav>
@@ -69,11 +71,27 @@
                                     <div id="progressFill" class="progress-fill"></div>
                                 </div>
                                 <div id="progressText" class="progress-text"></div>
+                                <div id="progressSpeed" class="progress-meta"></div>
+                                <div id="progressEta" class="progress-meta"></div>
                             </div>
                         </div>
 
                         <div id="downloadList" class="download-list"></div>
                     </main>
+                </div>
+
+                <div id="progressView" class="view hidden">
+                    <h2>下载进度</h2>
+                    <p id="progressViewHint" class="progress-view-hint">暂无进行中的下载，请从主界面开始下载。</p>
+                    <div id="downloadProgressList" class="download-progress-list" aria-label="下载任务列表"></div>
+                </div>
+
+                <div id="historyView" class="view hidden">
+                    <h2>历史记录</h2>
+                    <div id="historyContent" class="history-content"
+                        style="white-space: pre-wrap; font-family: monospace; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 500px; overflow-y: auto;">
+                        加载中...
+                    </div>
                 </div>
 
                 <div id="settingsView" class="view hidden">

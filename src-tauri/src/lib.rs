@@ -3,19 +3,23 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config;
 mod down_bangumi;
 mod down_bv;
 mod init_;
+mod progress;
 mod qrcode_login;
 mod refresh_cookie;
 mod resolution;
 mod wbi;
 
 use anyhow::Result;
+use config::ConfigState;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::Emitter;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VideoInfo {
@@ -92,12 +96,13 @@ async fn get_video_info(url: String) -> Result<VideoInfo, String> {
     Ok(VideoInfo { title, pic_url })
 }
 
-/// 下载视频
-#[tauri::command]
-async fn download_video(
+/// 内部：执行单任务下载并可选上报进度与标题
+async fn download_video_with_tx(
     url: String,
     resolution: String,
     save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
+    title_tx: Option<(usize, mpsc::Sender<(usize, String)>)>,
 ) -> Result<DownloadResult, String> {
     let video = init_::get_epid_season(&url).map_err(|e| format!("解析 URL 失败: {}", e))?;
 
@@ -107,12 +112,7 @@ async fn download_video(
         resolution
     };
 
-    // 更新保存路径（如果需要）
-    if !save_path.is_empty() {
-        // 这里可以更新全局保存路径
-    }
-
-    match init_::choose_download_method(&video, &rsl, &save_path).await {
+    match init_::choose_download_method(&video, &rsl, &save_path, progress_tx, title_tx).await {
         Ok(title) => Ok(DownloadResult {
             success: true,
             message: format!("下载完成: {}", title),
@@ -126,22 +126,90 @@ async fn download_video(
     }
 }
 
-/// 批量下载视频
+/// 下载视频（带实时进度）
+#[tauri::command]
+async fn download_video(
+    app: tauri::AppHandle,
+    url: String,
+    resolution: String,
+    save_path: String,
+) -> Result<DownloadResult, String> {
+    let (tx, mut rx) = mpsc::channel::<progress::DownloadProgress>(64);
+    let app_emit = app.clone();
+    let recv_handle = tokio::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            let _ = app_emit.emit("download-progress", &p);
+        }
+    });
+
+    let result = download_video_with_tx(url, resolution, save_path, Some(tx.clone()), None).await;
+    drop(tx);
+    recv_handle.await.ok();
+    result
+}
+
+/// 批量下载视频：每个任务独立进度，进度事件带 url_index
 #[tauri::command]
 async fn download_videos(
+    app: tauri::AppHandle,
     urls: Vec<String>,
     resolution: String,
     save_path: String,
 ) -> Result<Vec<DownloadResult>, String> {
-    let mut results = Vec::new();
     let rsl = if resolution.is_empty() {
         "4K".to_string()
     } else {
         resolution
     };
 
-    for url in urls {
-        let result = download_video(url, rsl.clone(), save_path.clone()).await;
+    let (tx_agg, mut rx_agg) = mpsc::channel::<(usize, progress::DownloadProgress)>(64);
+    let (title_tx, mut title_rx) = mpsc::channel::<(usize, String)>(8);
+    let app_emit = app.clone();
+    let recv_handle = tokio::spawn(async move {
+        while let Some((url_index, p)) = rx_agg.recv().await {
+            let payload = serde_json::json!({
+                "url_index": url_index,
+                "downloaded": p.downloaded,
+                "total": p.total,
+                "percent": p.percent,
+                "speed": p.speed,
+                "eta_secs": p.eta_secs,
+                "file_index": p.file_index,
+                "file_count": p.file_count,
+            });
+            let _ = app_emit.emit("download-progress", payload);
+        }
+    });
+    let app_title = app.clone();
+    let title_handle = tokio::spawn(async move {
+        while let Some((url_index, title)) = title_rx.recv().await {
+            let payload = serde_json::json!({ "url_index": url_index, "title": title });
+            let _ = app_title.emit("download-task-title", payload);
+        }
+    });
+
+    let mut results = Vec::new();
+    for (index, url) in urls.into_iter().enumerate() {
+        let (tx_per, mut rx_per) = mpsc::channel::<progress::DownloadProgress>(64);
+        let tx_agg = tx_agg.clone();
+        let index = index;
+        let forwarder = tokio::spawn(async move {
+            while let Some(p) = rx_per.recv().await {
+                let _ = tx_agg.send((index, p)).await;
+            }
+        });
+
+        let result = download_video_with_tx(
+            url,
+            rsl.clone(),
+            save_path.clone(),
+            Some(tx_per.clone()),
+            Some((index, title_tx.clone())),
+        )
+        .await;
+        drop(tx_per);
+        forwarder.await.ok();
+
         match result {
             Ok(r) => results.push(r),
             Err(e) => results.push(DownloadResult {
@@ -152,21 +220,28 @@ async fn download_videos(
         }
     }
 
+    drop(tx_agg);
+    drop(title_tx);
+    recv_handle.await.ok();
+    title_handle.await.ok();
     Ok(results)
 }
 
 /// 获取保存路径
 #[tauri::command]
-async fn get_save_path() -> Result<String, String> {
-    let path = Path::new("load");
-    // 这里可以从配置文件读取，暂时返回默认值
-    Ok("./download".to_string())
+async fn get_save_path(state: tauri::State<'_, ConfigState>) -> Result<String, String> {
+    let config = state.config.lock().map_err(|e| e.to_string())?;
+    Ok(config.save_path.clone())
 }
 
 /// 设置保存路径
 #[tauri::command]
-async fn set_save_path(path: String) -> Result<(), String> {
-    // 这里可以保存到配置文件
+async fn set_save_path(state: tauri::State<'_, ConfigState>, path: String) -> Result<(), String> {
+    {
+        let mut config = state.config.lock().map_err(|e| e.to_string())?;
+        config.save_path = path;
+    }
+    state.save()?; // 保存到文件
     Ok(())
 }
 
@@ -177,23 +252,25 @@ async fn check_login() -> Result<bool, String> {
     Ok(path.exists())
 }
 
+/// 读取下载历史记录
 #[tauri::command]
-async fn download_progress(app: tauri::AppHandle) -> Result<(), String> {
-    let total_steps = 100;
-    for i in 0..=total_steps {
-        app.emit("download-progress", i)
-            .map_err(|e| e.to_string())?;
-        std::thread::sleep(std::time::Duration::from_millis(50));
+async fn read_history_log() -> Result<String, String> {
+    if Path::new("dat.log").exists() {
+        std::fs::read_to_string("dat.log").map_err(|e| e.to_string())
+    } else {
+        Ok(String::new())
     }
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化配置，如果不存在先创建一个默认的
+    let config_state = ConfigState::new();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(config_state) // 注入状态
         .invoke_handler(tauri::generate_handler![
-            download_progress,
             get_resolutions,
             get_save_path,
             set_save_path,
@@ -202,7 +279,8 @@ pub fn run() {
             logout,
             get_video_info,
             download_video,
-            download_videos
+            download_videos,
+            read_history_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

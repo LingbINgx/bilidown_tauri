@@ -1,4 +1,5 @@
 use crate::down_bangumi::{concat_video_audio, read_cookie_or_not, remove_punctuation};
+use crate::progress;
 use crate::refresh_cookie::create_headers;
 use crate::resolution;
 use crate::wbi::get_wbi_keys_main;
@@ -15,7 +16,9 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::time::Instant;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
 
 #[derive(Deserialize, Debug)]
 struct BV {
@@ -131,7 +134,15 @@ fn get_bv_url(play_url: &Value, rsl: &str) -> Result<(String, String, i32)> {
     Ok((video_url, audio_url, qn))
 }
 
-async fn down_file_url(url: &str, client: Client, headers: HeaderMap, path: &str) -> Result<()> {
+async fn down_file_url(
+    url: &str,
+    client: Client,
+    headers: HeaderMap,
+    path: &str,
+    progress_tx: Option<&mpsc::Sender<progress::DownloadProgress>>,
+    file_index: u32,
+    file_count: u32,
+) -> Result<()> {
     let resp = client
         .get(url)
         .headers(headers.clone())
@@ -147,10 +158,49 @@ async fn down_file_url(url: &str, client: Client, headers: HeaderMap, path: &str
     );
     let mut file = File::create(&path)?;
     let mut stream = resp.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let start = Instant::now();
+    let mut last_emit = Instant::now();
+    let mut last_downloaded: u64 = 0;
+    const EMIT_INTERVAL_MS: u64 = 200;
+
     while let Some(chunk) = stream.try_next().await? {
-        let chunk = chunk;
         file.write_all(&chunk)?;
-        pb.inc(chunk.len() as u64);
+        let len = chunk.len() as u64;
+        downloaded += len;
+        pb.inc(len);
+
+        if let Some(tx) = progress_tx {
+            if last_emit.elapsed().as_millis() >= EMIT_INTERVAL_MS as u128
+                || downloaded >= total_size
+            {
+                let elapsed_secs = last_emit.elapsed().as_secs_f64().max(0.001);
+                let speed = (downloaded - last_downloaded) as f64 / elapsed_secs;
+                let eta_secs = if speed > 0.0 && total_size > downloaded {
+                    ((total_size - downloaded) as f64 / speed) as u64
+                } else {
+                    0
+                };
+                let percent = if total_size > 0 {
+                    100.0 * downloaded as f64 / total_size as f64
+                } else {
+                    0.0
+                };
+                let _ = tx
+                    .send(progress::DownloadProgress {
+                        downloaded,
+                        total: total_size,
+                        percent,
+                        speed,
+                        eta_secs,
+                        file_index,
+                        file_count,
+                    })
+                    .await;
+                last_emit = Instant::now();
+                last_downloaded = downloaded;
+            }
+        }
     }
     pb.finish_with_message("Downloaded video stream");
     Ok(())
@@ -164,6 +214,7 @@ async fn down_file_bv_(
     rsl: &str,
     bv_id: &str,
     save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
 ) -> Result<()> {
     let (video_url, audio_url, qn) =
         get_bv_url(&url, rsl).unwrap_or((String::new(), String::new(), 0));
@@ -206,15 +257,31 @@ async fn down_file_bv_(
     println!("downloading {}", name);
 
     let urls = vec![(video_url, video_path), (audio_url, audio_path)];
-    for (url, path) in urls {
-        down_file_url(&url, client.clone(), headers.clone(), &path).await?;
+    for (file_index, (url, path)) in urls.iter().enumerate() {
+        let tx_ref = progress_tx.as_ref();
+        down_file_url(
+            url,
+            client.clone(),
+            headers.clone(),
+            path,
+            tx_ref,
+            file_index as u32,
+            2,
+        )
+        .await?;
     }
     concat_video_audio(name.clone(), save_path.clone()).await?;
     println!("Concat completed for {}", name);
     Ok(())
 }
 
-async fn bv_down_main(bv_id: &str, rsl: &str, save_path: String) -> Result<String> {
+async fn bv_down_main(
+    bv_id: &str,
+    rsl: &str,
+    save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
+    title_tx: Option<(usize, mpsc::Sender<(usize, String)>)>,
+) -> Result<String> {
     let client = reqwest::Client::new();
     let path = Path::new("load");
     let cookies = read_cookie_or_not(path).await?;
@@ -222,6 +289,9 @@ async fn bv_down_main(bv_id: &str, rsl: &str, save_path: String) -> Result<Strin
     let bv = get_bv_cid_title(&client, bv_id, headers.clone())
         .await
         .context("Failed to get bv cid title")?;
+    if let Some((idx, tx)) = &title_tx {
+        let _ = tx.send((*idx, bv.title.clone())).await;
+    }
     println!("{:#?}", bv);
 
     let play_url = get_bv_play_url(&client, &bv.bv_id, &bv.cid, headers.clone(), rsl)
@@ -235,13 +305,20 @@ async fn bv_down_main(bv_id: &str, rsl: &str, save_path: String) -> Result<Strin
         rsl,
         &bv.bv_id,
         save_path,
+        progress_tx,
     )
     .await?;
     Ok(bv.title)
 }
 
-pub async fn down_main(bv_id: &str, rsl: &str, save_path: String) -> Result<String> {
-    let title = bv_down_main(bv_id, rsl, save_path).await?;
+pub async fn down_main(
+    bv_id: &str,
+    rsl: &str,
+    save_path: String,
+    progress_tx: Option<mpsc::Sender<progress::DownloadProgress>>,
+    title_tx: Option<(usize, mpsc::Sender<(usize, String)>)>,
+) -> Result<String> {
+    let title = bv_down_main(bv_id, rsl, save_path, progress_tx, title_tx).await?;
     Ok(title)
 }
 
