@@ -54,7 +54,7 @@
                             <div class="cover-section">
                                 <label>封面:</label>
                                 <div id="coverContainer">
-                                    <img id="coverImage" style="display: none;" alt="视频封面">
+                                    <img id="coverImage" alt="视频封面">
                                     <p id="noCover" class="placeholder">暂无封面</p>
                                 </div>
                             </div>
@@ -88,8 +88,7 @@
 
                 <div id="historyView" class="view hidden">
                     <h2>历史记录</h2>
-                    <div id="historyContent" class="history-content"
-                        style="white-space: pre-wrap; font-family: monospace; background: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd; max-height: 500px; overflow-y: auto;">
+                    <div id="historyContent" class="history-content">
                         加载中...
                     </div>
                 </div>
@@ -99,6 +98,16 @@
                     <div class="settings-group">
                         <label for="savePath">保存路径:</label>
                         <input type="text" id="savePath" placeholder="./download">
+                    </div>
+                    <div class="settings-group">
+                        <label for="themeMode">主题模式:</label>
+                        <select id="themeMode">
+                            <option value="auto">跟随系统</option>
+                            <option value="light">浅色</option>
+                            <option value="dark">深色</option>
+                        </select>
+                    </div>
+                    <div class="settings-group">
                         <button id="saveSettingsBtn" class="btn-primary">保存</button>
                     </div>
                 </div>

@@ -1,5 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+import { initThemeControls } from './theme.js';
 
 document.addEventListener("contextmenu", function (e) {
 
@@ -481,6 +482,7 @@ async function saveSettings() {
 
 // 事件监听
 document.addEventListener('DOMContentLoaded', () => {
+    initThemeControls({ selectId: 'themeMode' });
     init();
 
     // 侧栏：主界面 / 下载进度 / 设置 / 关于

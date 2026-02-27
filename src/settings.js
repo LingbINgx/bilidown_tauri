@@ -1,5 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { getCurrent } = window.__TAURI__.window;
+import { initThemeControls } from './theme.js';
 
 async function init() {
     try {
@@ -40,6 +41,7 @@ async function saveSettings() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    initThemeControls({ selectId: 'themeMode' });
     init();
     document.getElementById('closeBtn').addEventListener('click', () => {
         getCurrent().close();
