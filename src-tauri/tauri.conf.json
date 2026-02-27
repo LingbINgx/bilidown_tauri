@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "bilidown_tauri",
-  "version": "0.1.0",
   "identifier": "com.lingbingx.bilidown-tauri",
   "build": {
     "frontendDist": "../src"
