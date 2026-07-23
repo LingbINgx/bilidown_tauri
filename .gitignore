@@ -25,3 +25,6 @@ dist-ssr
 *.mkv
 *.png
 *.jpg
+
+*.exe 
+*.dll
